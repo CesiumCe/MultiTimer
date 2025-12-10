@@ -1,0 +1,17 @@
+Index: app/src/main/java/com/example/multitimer/MainActivity.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/multitimer/MainActivity.kt b/app/src/main/java/com/example/multitimer/MainActivity.kt
+--- a/app/src/main/java/com/example/multitimer/MainActivity.kt	
++++ b/app/src/main/java/com/example/multitimer/MainActivity.kt	(date 1745395556937)
+@@ -365,7 +365,7 @@
+                         isRunning = false
+                         isCompleted = true
+                         playAudio()
+-//                        triggerVibration()
++                        triggerVibration()
+ //                        playAudio()
+                     }
+                 }

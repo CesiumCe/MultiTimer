@@ -1,0 +1,631 @@
+package com.example.multitimer
+
+import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.content.Context.VIBRATOR_SERVICE
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
+import android.os.Build
+import android.os.Bundle
+import android.os.Vibrator
+import android.os.VibrationEffect
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresApi
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            MaterialTheme {
+                TimerApp()
+            }
+        }
+    }
+}
+
+// 单例管理音频和震动
+@SuppressLint("StaticFieldLeak")
+// 单例管理音频和震动
+object NotificationManager {
+    private var mediaPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
+    private var isInitialized = false
+    private var context: android.content.Context? = null
+
+    fun initialize(context: android.content.Context) {
+        if (!isInitialized) {
+            this.context = context
+            initializeMediaPlayer()
+            vibrator = context.getSystemService(VIBRATOR_SERVICE) as Vibrator
+            isInitialized = true
+        }
+    }
+
+    private fun initializeMediaPlayer() {
+        val ctx = context ?: return
+
+        try {
+            // 释放旧的播放器
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply {
+                // 1. 首先尝试获取系统默认闹钟铃声
+                val alarmRingtoneUri = android.media.RingtoneManager.getActualDefaultRingtoneUri(
+                    ctx,
+                    android.media.RingtoneManager.TYPE_ALARM
+                )
+
+                if (alarmRingtoneUri != null) {
+                    // 如果找到了系统闹钟铃声，就使用它
+                    setDataSource(ctx, alarmRingtoneUri)
+                } else {
+                    // 2. 如果没有设置系统闹钟铃声，则回退到应用内置的音频
+                    val afd = ctx.resources.openRawResourceFd(R.raw.alarm)
+                    setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                    afd.close()
+                }
+
+                // 设置音频属性 - 关键部分
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    val audioAttributes = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                        .build()
+                    setAudioAttributes(audioAttributes)
+                } else {
+                    @Suppress("DEPRECATION")
+                    setAudioStreamType(AudioManager.STREAM_ALARM)
+                }
+
+                // 准备MediaPlayer
+                prepare()
+
+                // 设置循环播放
+                isLooping = true
+            }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // 如果出错，尝试使用应用内置音频作为最后的备用方案
+            try {
+                mediaPlayer?.release()
+                mediaPlayer = MediaPlayer.create(ctx, R.raw.alarm)?.apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        val audioAttributes = AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                            .build()
+                        setAudioAttributes(audioAttributes)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        setAudioStreamType(AudioManager.STREAM_ALARM)
+                    }
+                    isLooping = true
+                }
+            } catch (e2: Exception) {
+                e2.printStackTrace()
+            }
+        }
+    }
+
+    fun playNotification() {
+        try {
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    player.seekTo(0) // 回到开头
+                } else {
+                    // 确保播放器已准备
+                    if (!player.isPlaying) {
+                        player.start()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // 尝试重新初始化并播放
+            context?.let { ctx ->
+                initializeMediaPlayer()
+                mediaPlayer?.start()
+            }
+        }
+
+        // 震动
+        vibrator?.let { vib ->
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val vibrationEffect = VibrationEffect.createWaveform(
+                        longArrayOf(0, 1000, 1000),
+                        1
+                    )
+                    vib.vibrate(vibrationEffect)
+                } else {
+                    @Suppress("DEPRECATION")
+                    vib.vibrate(longArrayOf(0, 1000, 1000), 1)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun stopNotification() {
+        try {
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    player.pause()
+                    player.seekTo(0)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        try {
+            vibrator?.cancel()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun release() {
+        try {
+            mediaPlayer?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        mediaPlayer = null
+        vibrator = null
+        isInitialized = false
+        context = null
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimerApp() {
+    val timerViewModel: TimerViewModel = viewModel()
+    val context = LocalContext.current
+
+    // 初始化通知管理器
+    LaunchedEffect(Unit) {
+        NotificationManager.initialize(context)
+    }
+
+    // 确保在组件销毁时释放资源
+    LaunchedEffect(Unit) {
+        return@LaunchedEffect
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Multi Timer", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                actions = {
+                    IconButton(
+                        onClick = {
+                            NotificationManager.stopNotification()
+                            timerViewModel.clearAllTimers()
+                        }
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Clear All Timers")
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { timerViewModel.showAddDialog = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add Timer")
+            }
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            if (timerViewModel.timers.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No timers yet. Click + to add one.",
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(timerViewModel.timers) { timer ->
+                        TimerItem(
+                            timer = timer,
+                            onTimerUpdate = { updatedTimer ->
+                                timerViewModel.updateTimer(updatedTimer)
+                            },
+                            onTimerDelete = { timerToDelete ->
+                                timerViewModel.deleteTimer(timerToDelete)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (timerViewModel.showAddDialog) {
+            AddTimerDialog(
+                onDismiss = { timerViewModel.showAddDialog = false },
+                onAdd = { title, minutes, seconds ->
+                    timerViewModel.addTimer(title, minutes, seconds)
+                    timerViewModel.showAddDialog = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun TimerItem(
+    timer: Timer,
+    onTimerUpdate: (Timer) -> Unit,
+    onTimerDelete: (Timer) -> Unit
+) {
+    val coroutineScope = rememberCoroutineScope()
+    var currentTime by remember { mutableStateOf(timer.currTime) }
+    var isActive by remember { mutableStateOf(timer.active) }
+    var hasTriggered by remember { mutableStateOf(false) }
+    var isCompleted by remember { mutableStateOf(false) }
+
+    // 启动协程定期更新计时器
+    LaunchedEffect(timer) {
+        while (true) {
+            delay(100) // 每100毫秒更新一次
+            if (timer.active) {
+                val stillActive = timer.run()
+                currentTime = timer.currTime
+                isActive = timer.active
+
+                // 检查计时器是否结束
+                if (currentTime <= 0 && !hasTriggered) {
+                    NotificationManager.playNotification()
+                    hasTriggered = true
+                    isCompleted = true
+                }
+            } else {
+                // 如果计时器不活动，只更新当前时间
+                currentTime = timer.currTime
+                isActive = timer.active
+                if (currentTime <= 0) {
+                    isCompleted = true
+                } else if (currentTime > 0 && hasTriggered) {
+                    isCompleted = false
+                }
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isCompleted -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                isActive -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surface
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = timer.title,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = when {
+                        isCompleted -> MaterialTheme.colorScheme.onSurfaceVariant
+                        isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                )
+
+                IconButton(
+                    onClick = {
+                        if (isCompleted) {
+                            NotificationManager.stopNotification()
+                        }
+                        onTimerDelete(timer)
+                    }) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete Timer",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = formatTime(currentTime),
+                fontSize = 48.sp,
+                fontWeight = FontWeight.Light,
+                color = when {
+                    isCompleted -> MaterialTheme.colorScheme.onSurfaceVariant
+                    isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                FloatingActionButton(
+                    onClick = {
+                        if (isActive) {
+                            timer.pause()
+                            isActive = false
+                        } else {
+                            timer.start()
+                            isActive = true
+                            hasTriggered = false
+                            isCompleted = false
+                        }
+                    },
+                    containerColor = if (isActive)
+                        MaterialTheme.colorScheme.error
+                    else
+                        MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        if (isActive) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isActive) "Pause" else "Start"
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        timer.reset()
+                        currentTime = timer.currTime
+                        isActive = false
+                        hasTriggered = false
+                        if (isCompleted) {
+                            NotificationManager.stopNotification()
+                        }
+                        isCompleted = false
+                    },
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Reset")
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddTimerDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, Int, Int) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var minutes by remember { mutableStateOf("0") }
+    var seconds by remember { mutableStateOf("0") }
+    var errorMessage by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add New Timer") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Timer Name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = minutes,
+                        onValueChange = {
+                            if (it.isEmpty() || it.all { char -> char.isDigit() }) {
+                                minutes = it
+                            }
+                        },
+                        label = { Text("Minutes") },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    OutlinedTextField(
+                        value = seconds,
+                        onValueChange = {
+                            if (it.isEmpty() || it.all { char -> char.isDigit() }) {
+                                seconds = it
+                            }
+                        },
+                        label = { Text("Seconds") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (errorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val mins = minutes.toIntOrNull() ?: 0
+                    val secs = seconds.toIntOrNull() ?: 0
+
+                    if (title.isBlank()) {
+                        errorMessage = "Please enter a timer name"
+                        return@Button
+                    }
+
+                    if (mins <= 0 && secs <= 0) {
+                        errorMessage = "Please enter a valid time"
+                        return@Button
+                    }
+
+                    onAdd(title, mins, secs)
+                }
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+class TimerViewModel : ViewModel() {
+    val timers = mutableStateListOf<Timer>()
+    var showAddDialog by mutableStateOf(false)
+
+    fun addTimer(title: String, minutes: Int, seconds: Int) {
+        val totalSeconds = minutes * 60L + seconds
+        timers.add(Timer(title, totalSeconds))
+    }
+
+    fun updateTimer(timer: Timer) {
+        val index = timers.indexOfFirst { it.title == timer.title }
+        if (index != -1) {
+            timers[index] = timer
+        }
+    }
+
+    fun deleteTimer(timer: Timer) {
+        timers.remove(timer)
+    }
+
+    fun clearAllTimers() {
+        timers.clear()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        // ViewModel销毁时释放资源
+        NotificationManager.release()
+    }
+}
+
+fun formatTime(seconds: Long): String {
+    val absSeconds = kotlin.math.abs(seconds)
+    val minutes = TimeUnit.SECONDS.toMinutes(absSeconds)
+    val secs = absSeconds % 60
+    return "${if (seconds < 0) "-" else ""}${String.format("%02d:%02d", minutes, secs)}"
+}
