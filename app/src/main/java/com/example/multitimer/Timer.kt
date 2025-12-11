@@ -1,6 +1,7 @@
 package com.example.multitimer
 
 import kotlin.math.max
+import kotlin.random.Random
 
 class Timer(val title: String, val initTime: Long) {
     var currTime: Long = initTime
@@ -8,7 +9,8 @@ class Timer(val title: String, val initTime: Long) {
     var active: Boolean = false
         private set
     private var lastTime: Long = 0
-    private var pauseTime: Long = 0 // 新增：记录暂停时刻的时间戳
+    private var pauseTime: Long = 0 // 新增：
+    val id: Int = Random.nextInt()
 
     fun start() {
         if (currTime <= 0) return // 如果时间已到，不能启动

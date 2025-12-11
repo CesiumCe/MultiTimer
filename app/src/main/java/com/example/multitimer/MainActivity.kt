@@ -1,6 +1,9 @@
 package com.example.multitimer
 
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.content.Context
+import android.content.Context.NOTIFICATION_SERVICE
 import android.content.Context.VIBRATOR_SERVICE
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -9,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Vibrator
 import android.os.VibrationEffect
+import android.provider.Settings.Global.getString
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -63,20 +67,44 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
 import kotlin.Int
+import android.app.PendingIntent
+import android.content.Intent
+import android.util.Log
+import androidx.core.app.TaskStackBuilder
+
+private const val TIMER_CHANNEL_ID = "com.example.multitimer.TIMER_CHANNEL"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d("MainActivity", "onCreate called - savedInstanceState: $savedInstanceState")
         enableEdgeToEdge()
         setContent {
             MaterialTheme {
                 TimerApp()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("from_notification", false) == true) {
+            NotificationManager.stopNotification()
+            // 可选：清除标记，避免重复触发
+            intent.putExtra("from_notification", false)
         }
     }
 }
@@ -317,7 +345,8 @@ fun TimerApp() {
                             },
                             onTimerDelete = { timerToDelete ->
                                 timerViewModel.deleteTimer(timerToDelete)
-                            }
+                            },
+                            context = context
                         )
                     }
                 }
@@ -340,7 +369,8 @@ fun TimerApp() {
 fun TimerItem(
     timer: Timer,
     onTimerUpdate: (Timer) -> Unit,
-    onTimerDelete: (Timer) -> Unit
+    onTimerDelete: (Timer) -> Unit,
+    context: Context
 ) {
     val coroutineScope = rememberCoroutineScope()
     var currentTime by remember { mutableStateOf(timer.currTime) }
@@ -359,6 +389,7 @@ fun TimerItem(
 
                 // 检查计时器是否结束
                 if (currentTime <= 0 && !hasTriggered) {
+                    sendNotification(context, timer)
                     NotificationManager.playNotification()
                     hasTriggered = true
                     isCompleted = true
@@ -489,6 +520,55 @@ fun TimerItem(
             }
         }
     }
+}
+
+@SuppressLint("MissingPermission")
+fun sendNotification(context: Context, timer: Timer) {
+    // 1. 创建通知渠道（仅 Android O 及以上需要）
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val channel = NotificationChannel(
+            TIMER_CHANNEL_ID,
+            "Timer Notifications",
+            android.app.NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Notifications for MultiTimer"
+            enableLights(true)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 1000, 1000)
+        }
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    // 2. 构建跳转 Intent
+    val intent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        putExtra("from_notification", true)
+    }
+
+    // 3. 创建 PendingIntent（使用 TaskStackBuilder 保证任务栈正确）
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        timer.id,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    // 4. 构建通知
+    val notification = NotificationCompat.Builder(context, TIMER_CHANNEL_ID)
+        .setContentTitle("Timer Finished")
+        .setContentText("Timer “${timer.title}” has finished!")
+        .setSmallIcon(R.drawable.ic_timer) // 或使用 android.R.drawable.ic_dialog_alert 临时替代
+        .setContentIntent(pendingIntent)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setAutoCancel(true)
+        .setDefaults(NotificationCompat.DEFAULT_ALL)
+        .setVibrate(longArrayOf(0, 1000, 1000))
+        .build()
+
+    // 5. 发送通知
+    val notificationManager = ContextCompat.getSystemService(context, android.app.NotificationManager::class.java)
+    notificationManager?.notify(timer.id, notification)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
