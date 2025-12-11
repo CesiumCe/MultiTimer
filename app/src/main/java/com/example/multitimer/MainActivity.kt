@@ -1,7 +1,6 @@
 package com.example.multitimer
 
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.content.Context.VIBRATOR_SERVICE
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -13,7 +12,6 @@ import android.os.VibrationEffect
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -38,7 +35,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,7 +44,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -63,18 +58,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
@@ -91,7 +82,6 @@ class MainActivity : ComponentActivity() {
 
 // 单例管理音频和震动
 @SuppressLint("StaticFieldLeak")
-// 单例管理音频和震动
 object NotificationManager {
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
@@ -114,7 +104,7 @@ object NotificationManager {
             // 释放旧的播放器
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
-                // 1. 首先尝试获取系统默认闹钟铃声
+                // 首先尝试获取系统默认闹钟铃声
                 val alarmRingtoneUri = android.media.RingtoneManager.getActualDefaultRingtoneUri(
                     ctx,
                     android.media.RingtoneManager.TYPE_ALARM
@@ -124,13 +114,13 @@ object NotificationManager {
                     // 如果找到了系统闹钟铃声，就使用它
                     setDataSource(ctx, alarmRingtoneUri)
                 } else {
-                    // 2. 如果没有设置系统闹钟铃声，则回退到应用内置的音频
+                    // 如果没有设置系统闹钟铃声，则回退到应用内置的音频
                     val afd = ctx.resources.openRawResourceFd(R.raw.alarm)
                     setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                     afd.close()
                 }
 
-                // 设置音频属性 - 关键部分
+                // 设置音频属性
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     val audioAttributes = AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
@@ -569,8 +559,9 @@ fun AddTimerDialog(
                     val secs = seconds.toIntOrNull() ?: 0
 
                     if (title.isBlank()) {
-                        errorMessage = "Please enter a timer name"
-                        return@Button
+                        title = "Untitled Timer"
+//                        errorMessage = "Please enter a timer name"
+//                        return@Button
                     }
 
                     if (mins <= 0 && secs <= 0) {
