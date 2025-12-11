@@ -1,6 +1,7 @@
 package com.example.multitimer
 
 import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.content.Context
 import android.content.Context.VIBRATOR_SERVICE
@@ -75,20 +76,37 @@ import kotlin.Int
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.compose.runtime.DisposableEffect
-
 import android.app.NotificationManager
+import android.content.pm.PackageManager
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 
 private const val TIMER_ONGOING_CHANNEL_ID = "com.example.multitimer.ONGOING"
 private const val TIMER_CHANNEL_ID = "com.example.multitimer.TIMER_CHANNEL"
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var notificationPermissionLauncher: ActivityResultLauncher<String>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        notificationPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            // 用户授权后，你可以刷新 UI 或 log
+            if (isGranted) {
+                println("通知权限已授予")
+            } else {
+                println("通知权限被拒绝")
+            }
+        }
+
         createNotificationChannels()
         enableEdgeToEdge()
         setContent {
             MaterialTheme {
-                TimerApp()
+                TimerApp(notificationPermissionLauncher)
             }
         }
 
@@ -99,13 +117,29 @@ class MainActivity : ComponentActivity() {
             val ongoingChannel = NotificationChannel(
                 TIMER_ONGOING_CHANNEL_ID,
                 "Ongoing Timers",
-                NotificationManager.IMPORTANCE_MIN
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Shows currently running timers"
-                // IMPORTANCE_MIN 会自动隐藏声音/震动/横幅
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(ongoingChannel)
+
+            val finishChannel = NotificationChannel(
+                TIMER_CHANNEL_ID,
+                "Timer Finished",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts when timer finishes"
+                enableLights(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 1000, 1000)
+                // 全屏 intent 依赖通道支持？某些设备需要设置
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    setShowBadge(true)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                }
+            }
+            nm.createNotificationChannel(finishChannel)
         }
     }
 
@@ -140,7 +174,6 @@ object AppNotificationManager {
         }
     }
 
-    @SuppressLint("ObsoleteSdkInt")
     private fun initializeMediaPlayer() {
         val ctx = context ?: return
 
@@ -279,13 +312,24 @@ object AppNotificationManager {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TimerApp() {
+fun TimerApp(
+    notificationPermissionLauncher: ActivityResultLauncher<String>? = null
+) {
     val timerViewModel: TimerViewModel = viewModel()
     val context = LocalContext.current
 
     // 初始化通知管理器
     LaunchedEffect(Unit) {
         AppNotificationManager.initialize(context)
+    }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = android.Manifest.permission.POST_NOTIFICATIONS
+            if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher?.launch(permission)
+            }
+        }
     }
 
     // 确保在组件销毁时释放资源
@@ -542,21 +586,7 @@ fun TimerItem(
     }
 }
 
-@SuppressLint("MissingPermission")
 fun sendNotification(context: Context, timer: Timer) {
-    val channel = NotificationChannel(
-        TIMER_CHANNEL_ID,
-        "Timer Notifications",
-        NotificationManager.IMPORTANCE_HIGH
-    ).apply {
-        description = "Notifications for MultiTimer"
-        enableLights(true)
-        enableVibration(true)
-        vibrationPattern = longArrayOf(0, 1000, 1000)
-    }
-    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    notificationManager.createNotificationChannel(channel)
-
     // === 全屏 Intent ===
     val fullScreenIntent = Intent(context, TimerAlertActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -746,19 +776,21 @@ fun updateOngoingNotification(context: Context, timer: Timer) {
     val notification = NotificationCompat.Builder(context, TIMER_ONGOING_CHANNEL_ID)
         .setContentTitle("Timer: ${timer.title}")
         .setContentText("Remaining: ${formatTime(timer.currTime)}")
-        .setSmallIcon(R.drawable.ic_timer) // 或 android.R.drawable.stat_sys_timer
-        .setOngoing(true) // 可选：防止用户手动清除（建议开启）
-        .setPriority(NotificationCompat.PRIORITY_MIN)
+        .setSmallIcon(R.drawable.ic_timer)
+        .setOngoing(true)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .setShowWhen(false)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         .build()
 
     val nm = ContextCompat.getSystemService(context, NotificationManager::class.java)
-    nm?.notify(timer.id, notification)
+    nm?.notify(-timer.id, notification)
 }
 
 fun cancelOngoingNotification(context: Context, timerId: Int) {
     val nm = ContextCompat.getSystemService(context, NotificationManager::class.java)
-    nm?.cancel(timerId)
+    nm?.cancel(-timerId)
 }
 
 @SuppressLint("DefaultLocale")
