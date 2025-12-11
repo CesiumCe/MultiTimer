@@ -67,6 +67,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
+import kotlin.Int
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -326,8 +327,8 @@ fun TimerApp() {
         if (timerViewModel.showAddDialog) {
             AddTimerDialog(
                 onDismiss = { timerViewModel.showAddDialog = false },
-                onAdd = { title, minutes, seconds ->
-                    timerViewModel.addTimer(title, minutes, seconds)
+                onAdd = { title, hours, minutes, seconds ->
+                    timerViewModel.addTimer(title, hours, minutes, seconds)
                     timerViewModel.showAddDialog = false
                 }
             )
@@ -494,9 +495,10 @@ fun TimerItem(
 @Composable
 fun AddTimerDialog(
     onDismiss: () -> Unit,
-    onAdd: (String, Int, Int) -> Unit
+    onAdd: (String, Int, Int, Int) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
+    var hours by remember { mutableStateOf("0")}
     var minutes by remember { mutableStateOf("0") }
     var seconds by remember { mutableStateOf("0") }
     var errorMessage by remember { mutableStateOf("") }
@@ -519,6 +521,17 @@ fun AddTimerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    OutlinedTextField(
+                        value = hours,
+                        onValueChange = {
+                            if (it.isEmpty() || it.all { char -> char.isDigit() }) {
+                                hours = it
+                            }
+                        },
+                        label = { Text("Hours") },
+                        modifier = Modifier.weight(1f)
+                    )
+
                     OutlinedTextField(
                         value = minutes,
                         onValueChange = {
@@ -555,21 +568,26 @@ fun AddTimerDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val hurs = hours.toIntOrNull() ?: 0
                     val mins = minutes.toIntOrNull() ?: 0
                     val secs = seconds.toIntOrNull() ?: 0
 
                     if (title.isBlank()) {
-                        title = "Untitled Timer"
+                        var calcTime = hurs * 3600 + mins * 60 + secs
+                        var hourText = (calcTime / 3600).toInt()
+                        var minText = (calcTime % 3600 / 60).toInt()
+                        var secText = (calcTime % 60)
+                        title = "Untitled Timer ${if (hourText > 0) String.format("%d:%02d:%02d", hourText, minText, secText) else String.format("%d:%02d", minText, secText)}"
 //                        errorMessage = "Please enter a timer name"
 //                        return@Button
                     }
 
-                    if (mins <= 0 && secs <= 0) {
+                    if (hurs <= 0 && mins <= 0 && secs <= 0) {
                         errorMessage = "Please enter a valid time"
                         return@Button
                     }
 
-                    onAdd(title, mins, secs)
+                    onAdd(title, hurs, mins, secs)
                 }
             ) {
                 Text("Add")
@@ -587,8 +605,8 @@ class TimerViewModel : ViewModel() {
     val timers = mutableStateListOf<Timer>()
     var showAddDialog by mutableStateOf(false)
 
-    fun addTimer(title: String, minutes: Int, seconds: Int) {
-        val totalSeconds = minutes * 60L + seconds
+    fun addTimer(title: String, hours: Int, minutes: Int, seconds: Int) {
+        val totalSeconds = hours * 3600L + minutes * 60L + seconds
         timers.add(Timer(title, totalSeconds))
     }
 
@@ -616,7 +634,8 @@ class TimerViewModel : ViewModel() {
 
 fun formatTime(seconds: Long): String {
     val absSeconds = kotlin.math.abs(seconds)
-    val minutes = TimeUnit.SECONDS.toMinutes(absSeconds)
+    val hours = TimeUnit.SECONDS.toHours(absSeconds)
+    val minutes = TimeUnit.SECONDS.toMinutes(absSeconds % 3600)
     val secs = absSeconds % 60
-    return "${if (seconds < 0) "-" else ""}${String.format("%02d:%02d", minutes, secs)}"
+    return "${if (seconds < 0) "-" else ""}${if (hours <= 0) String.format("%02d:%02d", minutes, secs) else String.format("%02d:%02d:%02d", hours, minutes, secs)}"
 }
