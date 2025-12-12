@@ -1,5 +1,6 @@
 package com.example.multitimer
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -78,8 +79,13 @@ import android.content.Intent
 import androidx.compose.runtime.DisposableEffect
 import android.app.NotificationManager
 import android.content.pm.PackageManager
+import android.media.RingtoneManager
+import android.provider.Settings
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.res.stringResource
+import kotlin.math.abs
 
 private const val TIMER_ONGOING_CHANNEL_ID = "com.example.multitimer.ONGOING"
 private const val TIMER_CHANNEL_ID = "com.example.multitimer.TIMER_CHANNEL"
@@ -94,12 +100,6 @@ class MainActivity : ComponentActivity() {
         notificationPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { isGranted ->
-            // 用户授权后，你可以刷新 UI 或 log
-            if (isGranted) {
-                println("通知权限已授予")
-            } else {
-                println("通知权限被拒绝")
-            }
         }
 
         createNotificationChannels()
@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
             ).apply {
                 description = "Shows currently running timers"
             }
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(ongoingChannel)
 
             val finishChannel = NotificationChannel(
@@ -151,10 +151,20 @@ class MainActivity : ComponentActivity() {
     private fun handleNotificationIntent(intent: Intent?) {
         if (intent?.getBooleanExtra("from_notification", false) == true) {
             AppNotificationManager.stopNotification()
-            // 可选：清除标记，避免重复触发
             intent.putExtra("from_notification", false)
         }
     }
+}
+
+fun Context.getSharedPreferences() =
+    this.getSharedPreferences("multitimer_prefs", Context.MODE_PRIVATE)
+
+fun Context.setHasShownNotificationGuide(shown: Boolean) {
+    getSharedPreferences().edit().putBoolean("has_shown_notification_guide", shown).apply()
+}
+
+fun Context.hasShownNotificationGuide(): Boolean {
+    return getSharedPreferences().getBoolean("has_shown_notification_guide", false)
 }
 
 // 单例管理音频和震动
@@ -163,9 +173,9 @@ object AppNotificationManager {
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private var isInitialized = false
-    private var context: android.content.Context? = null
+    private var context: Context? = null
 
-    fun initialize(context: android.content.Context) {
+    fun initialize(context: Context) {
         if (!isInitialized) {
             this.context = context
             initializeMediaPlayer()
@@ -182,9 +192,9 @@ object AppNotificationManager {
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
                 // 首先尝试获取系统默认闹钟铃声
-                val alarmRingtoneUri = android.media.RingtoneManager.getActualDefaultRingtoneUri(
+                val alarmRingtoneUri = RingtoneManager.getActualDefaultRingtoneUri(
                     ctx,
-                    android.media.RingtoneManager.TYPE_ALARM
+                    RingtoneManager.TYPE_ALARM
                 )
 
                 if (alarmRingtoneUri != null) {
@@ -325,10 +335,21 @@ fun TimerApp(
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val permission = android.Manifest.permission.POST_NOTIFICATIONS
+            val permission = Manifest.permission.POST_NOTIFICATIONS
             if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) {
                 notificationPermissionLauncher?.launch(permission)
             }
+        }
+    }
+
+    // 状态：是否显示引导弹窗
+    var showGuideDialog by remember { mutableStateOf(false) }
+
+    // 首次启动自动弹出（仅一次）
+    LaunchedEffect(Unit) {
+        if (!context.hasShownNotificationGuide()) {
+            showGuideDialog = true
+            context.setHasShownNotificationGuide(true)
         }
     }
 
@@ -340,12 +361,25 @@ fun TimerApp(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Multi Timer", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ),
                 actions = {
+                    IconButton(
+                        onClick = { showGuideDialog = true },
+                        enabled = true // 始终可点击
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Notification Settings Guide",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.size(8.dp))
+
                     IconButton(
                         onClick = {
                             AppNotificationManager.stopNotification()
@@ -379,7 +413,7 @@ fun TimerApp(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No timers yet. Click + to add one.",
+                        text = stringResource(R.string.no_timers),
                         fontSize = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -416,7 +450,62 @@ fun TimerApp(
                 }
             )
         }
+
+        // 引导弹窗
+        if (showGuideDialog) {
+            NotificationGuideDialog(
+                onDismiss = { showGuideDialog = false },
+                context = context
+            )
+        }
+
+        if (timerViewModel.showAddDialog) {
+            AddTimerDialog(
+                onDismiss = { timerViewModel.showAddDialog = false },
+                onAdd = { title, hours, minutes, seconds ->
+                    timerViewModel.addTimer(title, hours, minutes, seconds)
+                    timerViewModel.showAddDialog = false
+                }
+            )
+        }
     }
+}
+
+
+
+@Composable
+fun NotificationGuideDialog(
+    onDismiss: () -> Unit,
+    context: Context
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.notification_guide_title)) },
+        text = {
+            Text(stringResource(R.string.notification_guide_message),
+                lineHeight = 20.sp
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onDismiss()
+                    // 跳转到 App 通知设置
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    }
+                    context.startActivity(intent)
+                }
+            ) {
+                Text(stringResource(R.string.go_to_settings))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.later))
+            }
+        }
+    )
 }
 
 @Composable
@@ -426,6 +515,11 @@ fun TimerItem(
     onTimerDelete: (Timer) -> Unit,
     context: Context
 ) {
+    val finishTitle = stringResource(R.string.finish)
+    val timerText = stringResource(R.string.timer)
+    val hasFinishedText = stringResource(R.string.has_finished)
+    val remainingText = stringResource(R.string.remaining)
+
     val coroutineScope = rememberCoroutineScope()
     var currentTime by remember { mutableStateOf(timer.currTime) }
     var isActive by remember { mutableStateOf(timer.active) }
@@ -441,12 +535,12 @@ fun TimerItem(
                 currentTime = timer.currTime
                 isActive = timer.active
 
-                updateOngoingNotification(context, timer)
+                updateOngoingNotification(context, timer, timerText, remainingText)
 
                 // 检查计时器是否结束
                 if (currentTime <= 0 && !hasTriggered) {
                     cancelOngoingNotification(context, timer.id)
-                    sendNotification(context, timer)
+                    sendNotification(context, timer, finishTitle, timerText, hasFinishedText)
                     AppNotificationManager.playNotification()
                     hasTriggered = true
                     isCompleted = true
@@ -512,7 +606,7 @@ fun TimerItem(
                     }) {
                     Icon(
                         Icons.Default.Delete,
-                        contentDescription = "Delete Timer",
+                        contentDescription = stringResource(R.string.delete_timer),
                         tint = MaterialTheme.colorScheme.error
                     )
                 }
@@ -586,7 +680,11 @@ fun TimerItem(
     }
 }
 
-fun sendNotification(context: Context, timer: Timer) {
+fun sendNotification(context: Context,
+                     timer: Timer,
+                     finishTitle: String,
+                     timerText: String,
+                     hasFinishedText: String) {
     // === 全屏 Intent ===
     val fullScreenIntent = Intent(context, TimerAlertActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -614,8 +712,8 @@ fun sendNotification(context: Context, timer: Timer) {
 
     // === 构建通知 ===
     val notification = NotificationCompat.Builder(context, TIMER_CHANNEL_ID)
-        .setContentTitle("Timer Finished")
-        .setContentText("Timer “${timer.title}” has finished!")
+        .setContentTitle(finishTitle)
+        .setContentText("$timerText '${timer.title}' $hasFinishedText")
         .setSmallIcon(R.drawable.ic_timer)
         .setContentIntent(normalPendingIntent)       // 点击通知（非全屏时）
         .setFullScreenIntent(fullScreenPendingIntent, true)
@@ -637,6 +735,9 @@ fun AddTimerDialog(
     onDismiss: () -> Unit,
     onAdd: (String, Int, Int, Int) -> Unit
 ) {
+    val untitledText = stringResource(R.string.untitled)
+    val timeErrorMsg = stringResource(R.string.time_error_msg)
+
     var title by remember { mutableStateOf("") }
     var hours by remember { mutableStateOf("0")}
     var minutes by remember { mutableStateOf("0") }
@@ -645,13 +746,13 @@ fun AddTimerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add New Timer") },
+        title = { Text(stringResource(R.string.add_timer)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Timer Name") },
+                    label = { Text(stringResource(R.string.timer_name)) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -668,7 +769,7 @@ fun AddTimerDialog(
                                 hours = it
                             }
                         },
-                        label = { Text("Hours") },
+                        label = { Text(stringResource(R.string.hours)) },
                         modifier = Modifier.weight(1f)
                     )
 
@@ -679,7 +780,7 @@ fun AddTimerDialog(
                                 minutes = it
                             }
                         },
-                        label = { Text("Minutes") },
+                        label = { Text(stringResource(R.string.minutes)) },
                         modifier = Modifier.weight(1f)
                     )
 
@@ -690,7 +791,7 @@ fun AddTimerDialog(
                                 seconds = it
                             }
                         },
-                        label = { Text("Seconds") },
+                        label = { Text(stringResource(R.string.seconds)) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -717,25 +818,25 @@ fun AddTimerDialog(
                         var hourText = (calcTime / 3600).toInt()
                         var minText = (calcTime % 3600 / 60).toInt()
                         var secText = (calcTime % 60)
-                        title = "Untitled Timer ${if (hourText > 0) String.format("%d:%02d:%02d", hourText, minText, secText) else String.format("%d:%02d", minText, secText)}"
+                        title = "$untitledText ${if (hourText > 0) String.format("%d:%02d:%02d", hourText, minText, secText) else String.format("%d:%02d", minText, secText)}"
 //                        errorMessage = "Please enter a timer name"
 //                        return@Button
                     }
 
                     if (hurs <= 0 && mins <= 0 && secs <= 0) {
-                        errorMessage = "Please enter a valid time"
+                        errorMessage = timeErrorMsg
                         return@Button
                     }
 
                     onAdd(title, hurs, mins, secs)
                 }
             ) {
-                Text("Add")
+                Text(stringResource(R.string.add))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         }
     )
@@ -772,10 +873,10 @@ class TimerViewModel : ViewModel() {
     }
 }
 
-fun updateOngoingNotification(context: Context, timer: Timer) {
+fun updateOngoingNotification(context: Context, timer: Timer, timerText: String, remainingText: String) {
     val notification = NotificationCompat.Builder(context, TIMER_ONGOING_CHANNEL_ID)
-        .setContentTitle("Timer: ${timer.title}")
-        .setContentText("Remaining: ${formatTime(timer.currTime)}")
+        .setContentTitle("${timerText}: ${timer.title}")
+        .setContentText("${remainingText}: ${formatTime(timer.currTime)}")
         .setSmallIcon(R.drawable.ic_timer)
         .setOngoing(true)
         .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -795,7 +896,7 @@ fun cancelOngoingNotification(context: Context, timerId: Int) {
 
 @SuppressLint("DefaultLocale")
 fun formatTime(seconds: Long): String {
-    val absSeconds = kotlin.math.abs(seconds)
+    val absSeconds = abs(seconds)
     val hours = TimeUnit.SECONDS.toHours(absSeconds)
     val minutes = TimeUnit.SECONDS.toMinutes(absSeconds % 3600)
     val secs = absSeconds % 60
