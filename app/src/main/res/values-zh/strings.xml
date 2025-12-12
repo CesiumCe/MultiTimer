@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">MultiTimer</string>
+    <string name="no_timers">暂无计时器 点击 + 添加</string>
+    <string name="add_timer">添加新计时器</string>
+    <string name="timer_name">计时器名称</string>
+    <string name="hours">时</string>
+    <string name="minutes">分</string>
+    <string name="seconds">秒</string>
+    <string name="add">添加</string>
+    <string name="cancel">取消</string>
+    <string name="clear_all">清空所有计时器</string>
+    <string name="notification_guide_title">提升 MultiTimer 体验 </string>
+    <string name="notification_guide_message">开启以下设置，可确保计时结束时：\n• 在锁屏状态下弹出全屏提醒\n• 屏幕亮起时显示横幅通知\n\n这需要您在系统设置中允许相关权限</string>
+    <string name="go_to_settings">去设置</string>
+    <string name="later">稍后再说</string>
+    <string name="timer">计时器</string>
+    <string name="remaining">剩余时间</string>
+    <string name="time_error_msg">请输入有效时间</string>
+    <string name="untitled">未命名计时器</string>
+    <string name="finish">计时结束</string>
+    <string name="has_finished">计时结束！</string>
+    <string name="delete_timer">删除计时器</string>
+</resources>
